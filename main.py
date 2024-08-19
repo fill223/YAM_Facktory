@@ -9,6 +9,7 @@ import requests
 import re
 import sys
 import os
+import json
 
 # Load configuration from config.ini
 config = configparser.ConfigParser()
@@ -57,6 +58,10 @@ def extract_price(text):
     numbers = re.findall(r'\d+', text)
     return int(''.join(numbers))
 
+def parse_data_zone_data(element):
+    data_zone_data = element.get_attribute('data-zone-data')
+    return json.loads(data_zone_data)
+
 def run_profiles(api_key):
     print("Программа запустилась")
     profiles = get_profiles(api_key)
@@ -88,7 +93,6 @@ def run_profiles(api_key):
                     
                     # Шаг 3: Проверяем количество товара в корзине
                     try:
-                        # Попробуем другой подход с использованием селекторов по data-autotest-id
                         quantity_element = driver.find_element("xpath", "//a[@data-autotest-id='counter']")
                         current_quantity = int(quantity_element.text.strip())
                         print(f"Товар уже в корзине в количестве {current_quantity}. Уменьшаем до нуля.")
@@ -111,9 +115,40 @@ def run_profiles(api_key):
 
             except Exception as e:
                 print(f"Ошибка при обработке товара: {e}")
+            
             time.sleep(5)
             
             try:
+                # Шаг 1: Определяем итоговую стоимость
+                final_price_element = driver.find_element("xpath", "//h3[contains(text(),'Онлайн')]/following-sibling::span[contains(@class,'_')]")
+                final_price = extract_price(final_price_element.text)
+
+                # Шаг 2: Определяем выбранный метод оплаты и его скидку (если есть)
+                payment_methods = driver.find_elements("xpath", "//div[@data-baobab-name='paymentMethod']")
+                selected_discount = 0
+
+                for method in payment_methods:
+                    method_data = parse_data_zone_data(method)
+                    if method_data.get("selected"):
+                        selected_payment_method = method_data["paymentMethodId"]
+                        if selected_payment_method == "fake_ya_card":
+                            try:
+                                yandex_discount_element = driver.find_element("xpath", "//span[contains(text(),'скидка при оплате картой яндекс пэй')]/following-sibling::span")
+                                selected_discount = extract_price(yandex_discount_element.text)
+                            except:
+                                print("Yandex Pay discount not found.")
+                        elif selected_payment_method == "fake_alfa_bank":
+                            try:
+                                alfa_discount_element = driver.find_element("xpath", "//span[contains(text(),'альфа банка')]/ancestor::div[contains(@class, '_3VBOg')]//span[@data-auto='price']")
+                                selected_discount = extract_price(alfa_discount_element.text)
+                            except:
+                                print("Alfa Bank discount not found.")
+                        # Можно добавить обработку для других методов оплаты, если потребуется.
+
+                # Шаг 3: Вычисляем цену без скидок
+                raw_price = final_price + selected_discount
+
+                # Шаг 4: Находим скидки по Альфа-Банку и Яндекс.Пэй (если они не выбраны)
                 yandex_discount = 0
                 alfa_discount = 0
 
@@ -122,27 +157,24 @@ def run_profiles(api_key):
                     yandex_discount = extract_price(yandex_discount_element.text)
                 except:
                     print("Yandex Pay discount not found.")
-                
+
                 try:
                     alfa_discount_element = driver.find_element("xpath", "//span[contains(text(),'альфа банка')]/ancestor::div[contains(@class, '_3VBOg')]//span[@data-auto='price']")
                     alfa_discount = extract_price(alfa_discount_element.text)
                 except:
                     print("Alfa Bank discount not found.")
-                
-                # Get the final price (big green text)
-                final_price_element = driver.find_element("xpath", "//div[@data-baobab-name='totalPrice']")
-                final_price = extract_price(final_price_element.text)
-                
-                # Calculate Raw Price
-                selected_discount = yandex_discount if yandex_discount else alfa_discount
-                raw_price = final_price + selected_discount
 
+                # Шаг 5: Формируем вывод
                 print(f"Профиль {profile_name}, цены:")
                 print(f"Без скидки: {raw_price} ₽")
-                print(f"Яндекс.Пэй: {raw_price - yandex_discount} ₽")
-                print(f"Alfa: {raw_price - alfa_discount} ₽")
+                if yandex_discount > 0:
+                    print(f"Яндекс.Пэй: {raw_price - yandex_discount + selected_discount} ₽")
+                if alfa_discount > 0 and alfa_discount != final_price:
+                    print(f"Alfa: {raw_price - alfa_discount + selected_discount} ₽")
+
             except Exception as e:
                 print(f"Failed to retrieve prices: {e}")
+
 
             driver.quit()
             suppress_gologin_logs()

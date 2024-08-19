@@ -73,23 +73,44 @@ def run_profiles(api_key):
             print("Открываю ссылку")
             time.sleep(5)
             
-            # Click "Купить сейчас" or go to the cart
             try:
-                buy_now_button = driver.find_element("css selector", "button[data-auto='default-offer-buy-now-button']")
-                buy_now_button.click()
-                print('Нажал кнопку "Купить сейчас"')
-            except:
+                # Шаг 1: Проверка наличия кнопки "Купить сейчас"
                 try:
-                    cart_button = driver.find_element("css selector", "a[data-auto='counter-cart-button-go-to-cart-link']")
-                    cart_button.click()
-                    print('Кнопки нет, перешел в корзину')
-                    time.sleep(3)  # Wait for the page to load
-                    checkout_button = driver.find_element("css selector", "button[data-auto='cartCheckoutButton']")
-                    checkout_button.click()
-                    print('Нажал "Оформить заказ"')
-                except Exception as e:
-                    print(f"Failed to proceed to checkout: {e}")
-            
+                    buy_now_button = driver.find_element("css selector", "button[data-auto='default-offer-buy-now-button']")
+                    print('Кнопка "Купить сейчас" найдена')
+                    
+                    # Шаг 2: Нажимаем кнопку "Купить сейчас"
+                    buy_now_button.click()
+                    print('Нажал кнопку "Купить сейчас"')
+
+                except:
+                    print('Кнопка "Купить сейчас" не найдена, проверяю количество товара в корзине')
+                    
+                    # Шаг 3: Проверяем количество товара в корзине
+                    try:
+                        # Попробуем другой подход с использованием селекторов по data-autotest-id
+                        quantity_element = driver.find_element("xpath", "//a[@data-autotest-id='counter']")
+                        current_quantity = int(quantity_element.text.strip())
+                        print(f"Товар уже в корзине в количестве {current_quantity}. Уменьшаем до нуля.")
+                        
+                        # Шаг 4: Уменьшаем количество товара до нуля
+                        decrease_button = driver.find_element("xpath", "//div[@data-baobab-name='decrease']//button[@data-autotest-id='decrease']")
+                        while current_quantity > 0:
+                            decrease_button.click()
+                            current_quantity -= 1
+                            time.sleep(1)  # Ждем обновления количества
+                        print("Количество уменьшено до нуля.")
+                        
+                        # Шаг 5: Повторное нажатие на кнопку "Купить сейчас"
+                        buy_now_button = driver.find_element("css selector", "button[data-auto='default-offer-buy-now-button']")
+                        buy_now_button.click()
+                        print('Нажал кнопку "Купить сейчас" после уменьшения количества')
+                    
+                    except Exception as e:
+                        print(f"Ошибка при уменьшении количества или нажатии на кнопку 'Купить сейчас': {e}")
+
+            except Exception as e:
+                print(f"Ошибка при обработке товара: {e}")
             time.sleep(5)
             
             try:

@@ -2,6 +2,7 @@ import os
 import configparser
 import requests
 from selenium import webdriver
+from concurrent.futures import ThreadPoolExecutor
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -21,17 +22,18 @@ API_KEY = config['gologin']['api_key']
 SITE_URL = config['gologin']['site_url']
 CHROME_DRIVER_PATH = config['selenium']['chrome_driver_path']
 MAX_WORKERS = config.getint('selenium', 'max_workers')
+PROFILE_FOLDER = config['gologin']['profile_folder']  # Получение папки профилей из конфигурации
 BASE_URL = 'https://api.gologin.com/browser/v2'
 
-def get_profiles(api_key):
-    """Получает список профилей из GoLogin с использованием предоставленного API ключа."""
+def get_profiles(api_key, folder):
+    """Получает список профилей из GoLogin с использованием предоставленного API ключа и указанной папки."""
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json'
     }
     
     try:
-        response = requests.get(BASE_URL, headers=headers)
+        response = requests.get(f"{BASE_URL}?folder={folder}", headers=headers)  # Использование папки из конфигурации
         response.raise_for_status()
     except requests.exceptions.HTTPError as http_err:
         print(f"HTTP error occurred: {http_err}")
@@ -102,7 +104,6 @@ def clean_pickup_point_address(raw_text):
     else:
         first_line = address_lines[0].strip()
     return first_line
-
 
 def iterate_pickup_points(driver):
     """Перебирает все доступные пункты выдачи и возвращает данные с лучшей ценой."""
@@ -202,7 +203,7 @@ def run_profile(profile, api_key):
 
 def run_profiles_sequentially(api_key, max_profiles=5):
     """Выполняет процесс парсинга последовательно по всем профилям GoLogin."""
-    profiles_data = get_profiles(api_key)
+    profiles_data = get_profiles(api_key, PROFILE_FOLDER)  # Указание папки профилей
     if profiles_data is None:
         return
 

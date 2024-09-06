@@ -79,19 +79,23 @@ def start_selenium_with_profile(profile_id, api_key):
         print(f"Failed to start Selenium WebDriver for profile {profile_id}: {e}")
         raise
 
-def extract_order_status(driver):
-    """Извлекает статус заказов на странице."""
+def extract_cancelled_orders(driver):
+    """Извлекает отмененные заказы на странице."""
     try:
-        # Ожидание и нахождение элемента с информацией о статусе заказа
+        # Ожидание загрузки страницы и элементов на ней
         WebDriverWait(driver, 10, poll_frequency=0.2).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div._3pIQwl_1LDP4_2JXUw"))  # Локатор для поиска статуса
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
-        # Поиск всех элементов, содержащих текст статуса
-        order_status_elements = driver.find_elements(By.CSS_SELECTOR, "h3.ds-text_weight_bold")
-        order_statuses = [elem.text for elem in order_status_elements]
-        # Фильтруем заказы со статусом "Отменен"
-        cancelled_orders = [status for status in order_statuses if "Отменен" in status]
-        return cancelled_orders if cancelled_orders else ["No cancelled orders found"]
+
+        # Поиск всех элементов h3 с текстом "Отменён"
+        cancelled_orders = driver.find_elements(By.XPATH, "//h3[contains(text(), 'Отменён')]")
+
+        # Если нашли элементы с текстом "Отменён", возвращаем их
+        if cancelled_orders:
+            return ["Отменён"] * len(cancelled_orders)  # Возвращаем список с найденными статусами
+        else:
+            return ["No cancelled orders found"]
+
     except Exception as e:
         print(f"Failed to extract order statuses: {e}")
         return ["Failed to extract order statuses"]
@@ -103,7 +107,7 @@ def cleanup(temp_user_data_dir):
     except Exception as e:
         pass  # Можно добавить логгирование в случае отладки
 
-def run_profile(profile, api_key):
+def run_profile(profile, api_key, cancelled_profiles):
     """Выполняет процесс парсинга для одного профиля GoLogin."""
     profile_id = profile['id']
     profile_name = profile['name']
@@ -116,8 +120,12 @@ def run_profile(profile, api_key):
             time.sleep(2)  # Ждем загрузки страницы
 
             # Извлекаем статусы заказов с текущей страницы
-            cancelled_orders = extract_order_status(driver)
+            cancelled_orders = extract_cancelled_orders(driver)
             print(f"Profile: {profile_name}, Cancelled Orders: {', '.join(cancelled_orders)}")
+
+            # Если нашли отмененные заказы, добавляем профиль в список
+            if "Отменён" in cancelled_orders:
+                cancelled_profiles.append(profile_name)
 
         except Exception as e:
             print(f"Error during page interaction for profile {profile_name}: {e}")
@@ -142,8 +150,19 @@ def run_profiles_sequentially(api_key, max_profiles=5):
         if max_profiles is not None:
             profiles = profiles[:max_profiles]
 
+        # Список для хранения профилей с отмененными заказами
+        cancelled_profiles = []
+
         for profile in profiles:
-            run_profile(profile, api_key)
+            run_profile(profile, api_key, cancelled_profiles)
+
+        # После выполнения всех профилей, выводим список профилей с отмененными заказами
+        print("\nПрофили с отмененными заказами:")
+        if cancelled_profiles:
+            for cancelled_profile in cancelled_profiles:
+                print(cancelled_profile)
+        else:
+            print("Отмененные заказы не найдены.")
 
 def main():
     """Основная точка входа в программу."""

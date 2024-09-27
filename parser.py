@@ -1,3 +1,6 @@
+#Перебор аккаунтов из "папки". Все пвз,цены из карточки
+#Обновлен под конфиг
+
 import os
 import configparser
 import requests
@@ -21,7 +24,7 @@ config.read('config.ini')
 API_KEY = config['gologin']['api_key']
 SITE_URL = config['gologin']['site_url']
 CHROME_DRIVER_PATH = config['selenium']['chrome_driver_path']
-MAX_WORKERS = config.getint('selenium', 'max_workers')
+amount_of_profiles = config.getint('selenium', 'amount_of_profiles')
 PROFILE_FOLDER = config['gologin']['profile_folder']  # Получение папки профилей из конфигурации
 BASE_URL = 'https://api.gologin.com/browser/v2'
 
@@ -60,7 +63,7 @@ def start_selenium_with_profile(profile_id, api_key):
 
         # Настройка Chrome options для headless режима
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Включаем headless режим
+        chrome_options.add_argument("--headless=new")  # Включаем headless режим
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-extensions")
@@ -201,7 +204,7 @@ def run_profile(profile, api_key):
 
     return {'profile_name': profile_name, 'best_price': best_price, 'best_pickup_point': best_pickup_point}
 
-def run_profiles_sequentially(api_key, max_profiles=5):
+def run_profiles_sequentially(api_key, max_profiles):
     """Выполняет процесс парсинга последовательно по всем профилям GoLogin."""
     profiles_data = get_profiles(api_key, PROFILE_FOLDER)  # Указание папки профилей
     if profiles_data is None:
@@ -235,8 +238,8 @@ def run_profiles_sequentially(api_key, max_profiles=5):
 
 def main():
     """Основная точка входа в программу."""
-    max_profiles_to_use = MAX_WORKERS  # Используем значение из конфигурации
-    run_profiles_sequentially(API_KEY, max_profiles=max_profiles_to_use)
+    amount_of_profiles_to_use = amount_of_profiles  # Используем значение из конфигурации
+    run_profiles_sequentially(API_KEY, max_profiles=amount_of_profiles_to_use)
 
 if __name__ == "__main__":
     main()

@@ -1,154 +1,132 @@
-import os
 import configparser
-import requests
+import time
+from multiprocessing import Pool
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from gologin import GoLogin
+import requests
 import shutil
-import time
+import os
 
-# Загрузка конфигурации из config.ini
+# Чтение конфигурации из config.ini
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-# Чтение параметров из конфигурационного файла
-API_KEY = config['gologin']['api_key']
-SITE_URL = config['gologin']['profile_url']
-CHROME_DRIVER_PATH = config['selenium']['chrome_driver_path']
-MAX_WORKERS = config.getint('selenium', 'max_workers')
-PROFILE_FOLDER = config['gologin']['profile_folder']  # Получение папки профилей из конфигурации
-BASE_URL = 'https://api.gologin.com/browser/v2'
+# Данные из конфиг файла
+API_KEY = config.get('gologin', 'api_key')
+SITE_URL = config.get('gologin', 'site_url')
+PROFILE_FOLDER = config.get('gologin', 'profile_folder')
+PROFILE_URL = config.get('gologin', 'profile_url')
 
-def get_profiles(api_key, folder):
-    """Получает список профилей из GoLogin с использованием предоставленного API ключа и указанной папки."""
+CHROME_DRIVER_PATH = config.get('selenium', 'chrome_driver_path')
+MAX_WORKERS = config.getint('selenium', 'max_workers')
+AMOUNT_OF_PROFILES = config.getint('selenium', 'amount_of_profiles')
+
+# Функция для запуска профиля через GoLogin API
+def start_gologin_profile(profile_id):
     headers = {
-        'Authorization': f'Bearer {api_key}',
+        'Authorization': f'Bearer {API_KEY}',
         'Content-Type': 'application/json'
     }
     
+    url = f"https://api.gologin.com/browser/{profile_id}/run"
+    
+    # Тело запроса, которое запускает профиль
+    body = {
+        "running": True,
+        "type": "desktop",
+        "googleClientId": "string"
+    }
+    
+    response = requests.patch(url, headers=headers, json=body)
+    
+    if response.status_code == 200:
+        data = response.json()
+        debugger_url = data.get('wsUrl')  # Получаем URL для подключения через WebSocket
+        return debugger_url
+    else:
+        raise Exception(f"Failed to start GoLogin profile: {response.status_code}, {response.text}")
+
+# Основная функция для парсинга
+def scrap(profile):
     try:
-        response = requests.get(f"{BASE_URL}?folder={folder}", headers=headers)  # Использование папки из конфигурации
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP error occurred: {http_err}")
-        return None
-    except Exception as err:
-        print(f"Other error occurred: {err}")
-        return None
-
-    return response.json()
-
-def start_selenium_with_profile(profile_id, api_key):
-    """Запускает Selenium WebDriver с указанным профилем GoLogin в headless режиме."""
-    try:
-        gl = GoLogin({
-            "token": api_key,
-            "profile_id": profile_id,
-            "extra_params": {
-                "autoHeadless": True  # Включаем headless режим через GoLogin API
-            }
-        })
-
-        # Запускаем профиль GoLogin и получаем адрес отладчика
-        debugger_address = gl.start()
-
-        # Настройка Chrome options для headless режима
+        # Запускаем профиль через GoLogin API
+        debugger_address = start_gologin_profile(profile['profile_id'])
+        
+        # Настройка ChromeOptions для подключения к запущенному профилю
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Включаем headless режим
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-extensions")
         chrome_options.add_experimental_option("debuggerAddress", debugger_address)
 
-        # Используем уникальную временную директорию данных пользователя для каждого экземпляра
-        temp_user_data_dir = os.path.join('C:\\TempProfiles', f"chrome_profile_{profile_id}")
-        os.makedirs(temp_user_data_dir, exist_ok=True)
-        chrome_options.add_argument(f"--user-data-dir={temp_user_data_dir}")
-
-        # Указываем путь к загруженному ChromeDriver
-        service = ChromeService(executable_path=CHROME_DRIVER_PATH)
+        # Использование Service для указания пути к ChromeDriver
+        service = Service(executable_path=CHROME_DRIVER_PATH)
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
-        return driver, gl, temp_user_data_dir
+        # Переход на сайт
+        driver.get(SITE_URL)
 
-    except Exception as e:
-        print(f"Failed to start Selenium WebDriver for profile {profile_id}: {e}")
-        raise
-
-def extract_order_status(driver):
-    """Извлекает статус заказов на странице."""
-    try:
-        # Ожидание и нахождение элемента с информацией о статусе заказа
-        WebDriverWait(driver, 10, poll_frequency=0.2).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div._3pIQwl_1LDP4_2JXUw"))  # Локатор для поиска статуса
+        # Ожидание загрузки страницы
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "content"))  # Подстройка по нужному элементу
         )
-        # Поиск всех элементов, содержащих текст статуса
-        order_status_elements = driver.find_elements(By.CSS_SELECTOR, "h3.ds-text_weight_bold")
-        order_statuses = [elem.text for elem in order_status_elements]
-        # Фильтруем заказы со статусом "Отменен"
-        cancelled_orders = [status for status in order_statuses if "Отменен" in status]
-        return cancelled_orders if cancelled_orders else ["No cancelled orders found"]
+
+        # Вывод заголовка и URL страницы
+        print('Page title:', driver.title)
+        print('Page URL:', driver.current_url)  # Возвращаем или выводим URL текущей страницы
+
+        # Возврат URL для дальнейшего использования
+        return driver.current_url
+
     except Exception as e:
-        print(f"Failed to extract order statuses: {e}")
-        return ["Failed to extract order statuses"]
+        print(f"Error with profile {profile['profile_id']}: {str(e)}")
 
-def cleanup(temp_user_data_dir):
-    """Очищает временные директории."""
-    try:
-        shutil.rmtree(temp_user_data_dir)
-    except Exception as e:
-        pass  # Можно добавить логгирование в случае отладки
-
-def run_profile(profile, api_key):
-    """Выполняет процесс парсинга для одного профиля GoLogin."""
-    profile_id = profile['id']
-    profile_name = profile['name']
-
-    try:
-        driver, gl, temp_user_data_dir = start_selenium_with_profile(profile_id, api_key)
-        try:
-            # Открываем страницу заказов
-            driver.get(SITE_URL)
-            time.sleep(2)  # Ждем загрузки страницы
-
-            # Извлекаем статусы заказов с текущей страницы
-            cancelled_orders = extract_order_status(driver)
-            print(f"Profile: {profile_name}, Cancelled Orders: {', '.join(cancelled_orders)}")
-
-        except Exception as e:
-            print(f"Error during page interaction for profile {profile_name}: {e}")
-        finally:
-            # Закрытие ресурсов и очистка
+    finally:
+        if 'driver' in locals():
+            print('closing', profile['profile_id'])
             driver.quit()
+
+        # Ожидание завершения работы Chrome
+        time.sleep(5)
+        
+        # Остановка профиля и обработка ошибок
+        try:
+            gl = GoLogin({
+                'token': API_KEY,
+                'profile_id': profile['profile_id'],
+                'port': profile['port']
+            })
             gl.stop()
-            cleanup(temp_user_data_dir)
+        except PermissionError as e:
+            print(f"PermissionError: Unable to delete profile for {profile['profile_id']}: {e}")
+        except Exception as e:
+            print(f"Error while stopping GoLogin profile {profile['profile_id']}: {e}")
 
-    except Exception as e:
-        print(f"Error setting up Selenium for profile {profile_name}: {e}")
 
-def run_profiles_sequentially(api_key, max_profiles=5):
-    """Выполняет процесс парсинга последовательно по всем профилям GoLogin."""
-    profiles_data = get_profiles(api_key, PROFILE_FOLDER)  # Указание папки профилей
-    if profiles_data is None:
-        return
+if __name__ == '__main__':
+    # Функция для получения профилей с GoLogin API
+    def fetch_profiles(api_key, amount):
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        response = requests.get('https://api.gologin.com/browser/v2', headers=headers)
+        if response.status_code == 200:
+            profiles = response.json().get('profiles', [])
+            return [{'profile_id': profile['id'], 'port': 3500 + idx} for idx, profile in enumerate(profiles[:amount])]
+        else:
+            print(f"Failed to fetch profiles: {response.status_code}")
+            return []
 
-    if 'profiles' in profiles_data:
-        profiles = profiles_data['profiles']
+    profiles = fetch_profiles(API_KEY, AMOUNT_OF_PROFILES)
 
-        if max_profiles is not None:
-            profiles = profiles[:max_profiles]
+    if profiles:
+        with Pool(MAX_WORKERS) as p:
+            results = p.map(scrap, profiles)
 
-        for profile in profiles:
-            run_profile(profile, api_key)
-
-def main():
-    """Основная точка входа в программу."""
-    max_profiles_to_use = MAX_WORKERS  # Используем значение из конфигурации
-    run_profiles_sequentially(API_KEY, max_profiles=max_profiles_to_use)
-
-if __name__ == "__main__":
-    main()
+        # Вывод всех полученных URL
+        print("All scraped URLs:", results)
+    else:
+        print("No profiles found.")
